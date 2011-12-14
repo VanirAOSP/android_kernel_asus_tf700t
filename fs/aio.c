@@ -1623,7 +1623,6 @@ long do_io_submit(aio_context_t ctx_id, long nr,
 	long ret = 0;
 	int i;
 
-
 	if (unlikely(nr < 0))
 		return -EINVAL;
 
