@@ -166,7 +166,8 @@ static int __init cpufreq_read_maxkhz_cmdline(char *maxkhz)
 		return 1;
 	}
 
-    for_each_present_cpu(cpu) {
+    /* we can't use for_each_present_cpu here, the cpus are not yet there */
+    for (cpu=0; cpu<CONFIG_NR_CPUS; cpu++) {
         per_cpu(tegra_cpu_max_freq, cpu) = ui_khz;
     }
 
@@ -197,7 +198,8 @@ int Asus_camera_disable_set_emc_rate(void)
 		return 1;
 	}
 
-    for_each_present_cpu(cpu) {
+    /* we can't use for_each_present_cpu here, the cpus are not yet there */
+    for (cpu=0; cpu<CONFIG_NR_CPUS; cpu++) {
         per_cpu(tegra_cpu_min_freq, cpu) = ui_khz;
     }
 
@@ -1166,7 +1168,7 @@ static int tegra_cpu_init(struct cpufreq_policy *policy)
 
     policy->max = per_cpu(tegra_cpu_max_freq, policy->cpu);
     policy->min = per_cpu(tegra_cpu_min_freq, policy->cpu);
-    tegra_update_cpu_speed(per_cpu(tegra_cpu_max_freq, policy->cpu));
+    tegra_update_cpu_speed(policy->max);
 
 	if (policy->cpu == 0) {
 		register_pm_notifier(&tegra_cpu_pm_notifier);
@@ -1224,10 +1226,14 @@ static struct cpufreq_driver tegra_cpufreq_driver = {
 static int __init tegra_cpufreq_init(void)
 {
 	int ret = 0;
-	int i = 0;
+	struct tegra_cpufreq_table_data *table_data = tegra_cpufreq_table_get();
 
-	struct tegra_cpufreq_table_data *table_data =
-		tegra_cpufreq_table_get();
+    /* init cpu min/max defaults */
+    int cpu;
+    for_each_present_cpu(cpu) {
+            per_cpu(tegra_cpu_max_freq, cpu) = CONFIG_TEGRA_CPU_FREQ_MAX;
+    }
+
 	if (IS_ERR_OR_NULL(table_data))
 		return -EINVAL;
 
