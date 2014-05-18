@@ -354,13 +354,17 @@ AFLAGS_MODULE = $(MODFLAGS)
 LDFLAGS_MODULE = -T $(srctree)/scripts/module-common.lds
 CFLAGS_KERNEL	= -fgcse-lm -fgcse-sm -fsched-spec-load -fforce-addr -ffast-math -fsingle-precision-constant -mtune=cortex-a9 -marm -march=armv7-a -mfpu=neon -ftree-vectorize -mvectorize-with-neon-quad -funroll-loops
 AFLAGS_KERNEL	=
+
 CFLAGS_GCOV	= -fprofile-arcs -ftest-coverage
+
+ifdef CONFIG_CC_GRAPHITE_OPTIMIZATION
+CFLAGS_KERNEL	+= -fgraphite -fgraphite-identity -floop-parallelize-all -ftree-loop-linear -floop-interchange -floop-strip-mine -floop-block
+endif
 
 ifdef CONFIG_CC_LINK_TIME_OPTIMIZATION
 CFLAGS_KERNEL   += -flto -fno-toplevel-reorder -fuse-linker-plugin
 endif
 AFLAGS_KERNEL	= $(KERNELFLAGS)
-
 
 # Use LINUXINCLUDE when you must reference the include/ directory.
 # Needed to be compatible with the O= option
@@ -573,6 +577,9 @@ endif
 
 ifdef CONFIG_CC_LINK_TIME_OPTIMIZATION
 KBUILD_CFLAGS	+= -flto -fno-toplevel-reorder -fuse-linker-plugin
+endif
+ifdef CONFIG_CC_GRAPHITE_OPTIMIZATION
+KBUILD_CFLAGS	+= -fgraphite -fgraphite-identity -floop-parallelize-all -ftree-loop-linear -floop-interchange -floop-strip-mine -floop-block
 endif
 
 include $(srctree)/arch/$(SRCARCH)/Makefile
