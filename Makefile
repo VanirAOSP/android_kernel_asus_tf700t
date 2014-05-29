@@ -569,7 +569,6 @@ else
 KBUILD_CFLAGS	+= -O2
 endif
 
-
 ifdef CONFIG_CC_LINK_TIME_OPTIMIZATION
 KBUILD_CFLAGS	+= -flto -fno-toplevel-reorder -fuse-linker-plugin
 endif
