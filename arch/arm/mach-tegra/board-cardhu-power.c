@@ -45,11 +45,14 @@
 #include "board-cardhu.h"
 #include "pm.h"
 #include "tegra3_tsensor.h"
+#include "tegra_pmqos.h"
 #include "wakeups.h"
 #include "wakeups-t3.h"
 
 #define PMC_CTRL		0x0
 #define PMC_CTRL_INTR_LOW	(1 << 17)
+
+unsigned int tegra_pmqos_boost_freq = BOOST_CPU_FREQ_MIN;
 
 static struct regulator_consumer_supply tps6591x_vdd1_supply_skubit0_0[] = {
 	REGULATOR_SUPPLY("vdd_core", NULL),
