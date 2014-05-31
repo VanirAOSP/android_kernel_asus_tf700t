@@ -34,7 +34,6 @@
 #include <linux/debugfs.h>
 #include <linux/cpu.h>
 #include <mach/board-cardhu-misc.h>
-#include <linux/tegra_minmax_cpufreq.h>
 
 #include <asm/system.h>
 
@@ -48,15 +47,6 @@
 #include "pm.h"
 
 #include <linux/seq_file.h>
-
-/* create variables to hold our min/max speeds */
-DEFINE_PER_CPU(unsigned long int, tegra_cpu_min_freq);
-DEFINE_PER_CPU(unsigned long int, tegra_cpu_max_freq);
-
-#ifdef CONFIG_TEGRA_MPDECISION
-/* mpdecision notifier */
-extern int mpdecision_gmode_notifier(void);
-#endif
 
 #define SYSTEM_NORMAL_MODE	(0)
 #define SYSTEM_BALANCE_MODE	(1)
@@ -102,26 +92,6 @@ int Asus_camera_enable_set_emc_rate(unsigned long rate)
 
 	c = tegra_get_clock_by_name("emc");
 
-/* to be safe, fill vars with defaults */
-#ifdef CONFIG_CPU_FREQ_DEFAULT_GOV_PERFORMANCE
-char cmdline_gov[CPUFREQ_NAME_LEN] = "performance";
-#endif
-#ifdef CONFIG_CPU_FREQ_DEFAULT_GOV_POWERSAVE
-char cmdline_gov[CPUFREQ_NAME_LEN] = "powersave";
-#endif
-#ifdef CONFIG_CPU_FREQ_DEFAULT_GOV_USERSPACE
-char cmdline_gov[CPUFREQ_NAME_LEN] = "userspace";
-#endif
-#ifdef CONFIG_CPU_FREQ_DEFAULT_GOV_ONDEMAND
-char cmdline_gov[CPUFREQ_NAME_LEN] = "ondemand";
-#endif
-#ifdef CONFIG_CPU_FREQ_DEFAULT_GOV_CONSERVATIVE
-char cmdline_gov[CPUFREQ_NAME_LEN] = "conservative";
-#endif
-#ifdef CONFIG_CPU_FREQ_DEFAULT_GOV_INTERACTIVE
-char cmdline_gov[CPUFREQ_NAME_LEN] = "interactive";
-#endif
-
 	if (emc_clk == NULL){
 		emc_clk = clk_get_sys("cpu", "emc");
 		if (IS_ERR(emc_clk)) {
@@ -153,26 +123,6 @@ char cmdline_gov[CPUFREQ_NAME_LEN] = "interactive";
 	camera_enable = 1;
 
 	return 0;
-
-static int __init cpufreq_read_maxkhz_cmdline(char *maxkhz)
-{
-	unsigned long ui_khz;
-	int err, cpu;
-
-	err = strict_strtoul(maxkhz, 0, &ui_khz);
-	if (err) {
-		printk(KERN_INFO "[cmdline_khz_max]: ERROR while converting! using default value!");
-		printk(KERN_INFO "[cmdline_khz_max]: maxkhz='%lu'\n", per_cpu(tegra_cpu_max_freq, 0));
-		return 1;
-	}
-
-    /* we can't use for_each_present_cpu here, the cpus are not yet there */
-    for (cpu=0; cpu<CONFIG_NR_CPUS; cpu++) {
-        per_cpu(tegra_cpu_max_freq, cpu) = ui_khz;
-    }
-
-    printk(KERN_INFO "[cmdline_khz_max]: maxkhz='%lu'\n", per_cpu(tegra_cpu_max_freq, 0));
-    return 1;
 }
 
 int Asus_camera_disable_set_emc_rate(void)
@@ -187,26 +137,6 @@ int Asus_camera_disable_set_emc_rate(void)
 	}
 
 	c = tegra_get_clock_by_name("emc");
-
-	unsigned long ui_khz;
-	int err, cpu;
-
-	err = strict_strtoul(minkhz, 0, &ui_khz);
-	if (err) {
-		printk(KERN_INFO "[cmdline_khz_min]: ERROR while converting! using default value!");
-		printk(KERN_INFO "[cmdline_khz_min]: minkhz='%lu'\n", per_cpu(tegra_cpu_min_freq, 0));
-		return 1;
-	}
-
-    /* we can't use for_each_present_cpu here, the cpus are not yet there */
-    for (cpu=0; cpu<CONFIG_NR_CPUS; cpu++) {
-        per_cpu(tegra_cpu_min_freq, cpu) = ui_khz;
-    }
-
-    printk(KERN_INFO "[cmdline_khz_min]: minkhz='%lu'\n", per_cpu(tegra_cpu_min_freq, 0));
-    return 1;
-}
-__setup("minkhz=", cpufreq_read_minkhz_cmdline);
 
 	if (emc_clk == NULL) {
 		emc_clk = clk_get_sys("cpu", "emc");
@@ -1166,10 +1096,6 @@ static int tegra_cpu_init(struct cpufreq_policy *policy)
 	policy->shared_type = CPUFREQ_SHARED_TYPE_ALL;
 	cpumask_copy(policy->related_cpus, cpu_possible_mask);
 
-    policy->max = per_cpu(tegra_cpu_max_freq, policy->cpu);
-    policy->min = per_cpu(tegra_cpu_min_freq, policy->cpu);
-    tegra_update_cpu_speed(policy->max);
-
 	if (policy->cpu == 0) {
 		register_pm_notifier(&tegra_cpu_pm_notifier);
 	}
@@ -1226,14 +1152,10 @@ static struct cpufreq_driver tegra_cpufreq_driver = {
 static int __init tegra_cpufreq_init(void)
 {
 	int ret = 0;
-	struct tegra_cpufreq_table_data *table_data = tegra_cpufreq_table_get();
+	int i = 0;
 
-    /* init cpu min/max defaults */
-    int cpu;
-    for_each_present_cpu(cpu) {
-            per_cpu(tegra_cpu_max_freq, cpu) = CONFIG_TEGRA_CPU_FREQ_MAX;
-    }
-
+	struct tegra_cpufreq_table_data *table_data =
+		tegra_cpufreq_table_get();
 	if (IS_ERR_OR_NULL(table_data))
 		return -EINVAL;
 
