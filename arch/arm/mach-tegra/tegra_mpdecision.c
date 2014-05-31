@@ -37,6 +37,7 @@
 #include <asm-generic/cputime.h>
 #include <linux/hrtimer.h>
 #include <linux/delay.h>
+#include <linux/tegra_minmax_cpufreq.h>
 #ifdef CONFIG_TEGRA_MPDECISION_INPUTBOOST_CPUMIN
 #include <linux/input.h>
 #include <linux/slab.h>
@@ -46,24 +47,21 @@
 #include "cpu-tegra.h"
 #include "pm.h"
 
-#define DEBUG 0
+#define DEBUG                               0
 
-#define MPDEC_TAG                       "[MPDEC]: "
-#define TEGRA_MPDEC_STARTDELAY            20000
-#define TEGRA_MPDEC_DELAY                 130
-#define TEGRA_MPDEC_PAUSE                 10000
+#define MPDEC_TAG                           "[MPDEC]: "
+#define TEGRA_MPDEC_STARTDELAY              20000
+#define TEGRA_MPDEC_DELAY                   130
+#define TEGRA_MPDEC_PAUSE                   10000
 
 /* will be overwritten later by lpcpu max clock */
-#define TEGRA_MPDEC_IDLE_FREQ             475000
+#define TEGRA_MPDEC_IDLE_FREQ               475000
 
 /* This rq value will be used if we only have the lpcpu online */
-#define TEGRA_MPDEC_LPCPU_RQ_DOWN         36
+#define TEGRA_MPDEC_LPCPU_RQ_DOWN           36
 
-/*
- * This will replace TEGRA_MPDEC_DELAY in each case.
- */
-#define TEGRA_MPDEC_LPCPU_UPDELAY         130
-#define TEGRA_MPDEC_LPCPU_DOWNDELAY       2000
+/* This will be used to schedule lpcpu checks in suspend */
+#define TEGRA_MPDEC_LPCPU_CHECK_DELAY       200
 
 /*
  * LPCPU hysteresis default values
@@ -71,15 +69,15 @@
  * we need at least 3 requests to come out of lpmode.
  * This does not affect frequency overrides
  */
-#define TEGRA_MPDEC_LPCPU_UP_HYS        4
-#define TEGRA_MPDEC_LPCPU_DOWN_HYS      2
+#define TEGRA_MPDEC_LPCPU_UP_HYS            4
+#define TEGRA_MPDEC_LPCPU_DOWN_HYS          2
 
 #ifdef CONFIG_TEGRA_MPDECISION_INPUTBOOST_CPUMIN
-#define TEGRA_MPDEC_BOOSTTIME             1000
-#define TEGRA_MPDEC_BOOSTFREQ_CPU0        910000
-#define TEGRA_MPDEC_BOOSTFREQ_CPU1        910000
-#define TEGRA_MPDEC_BOOSTFREQ_CPU2        760000
-#define TEGRA_MPDEC_BOOSTFREQ_CPU3        620000
+#define TEGRA_MPDEC_BOOSTTIME               1000
+#define TEGRA_MPDEC_BOOSTFREQ_CPU0          910000
+#define TEGRA_MPDEC_BOOSTFREQ_CPU1          910000
+#define TEGRA_MPDEC_BOOSTFREQ_CPU2          760000
+#define TEGRA_MPDEC_BOOSTFREQ_CPU3          620000
 #endif
 
 enum {
@@ -443,16 +441,7 @@ int mpdecision_gmode_notifier(void) {
         /* if we are suspended, start lp checks */
         if ((per_cpu(tegra_mpdec_cpudata, 0).device_suspended == true)) {
             queue_delayed_work(tegra_mpdec_suspended_workq, &tegra_mpdec_suspended_work,
-                               TEGRA_MPDEC_LPCPU_UPDELAY);
-        } else {
-            /* we need to cancel the main workqueue here and restart it
-             * with the original delay again. Otherwise it may happen
-             * that the lpcpu will jump on/off in < set delay intervals
-             */
-            cancel_delayed_work_sync(&tegra_mpdec_work);
-            was_paused = true;
-            queue_delayed_work(tegra_mpdec_workq, &tegra_mpdec_work,
-                               msecs_to_jiffies(TEGRA_MPDEC_LPCPU_DOWNDELAY));
+                               TEGRA_MPDEC_LPCPU_CHECK_DELAY);
         }
     } else {
         pr_err(MPDEC_TAG"CPU[LP] error, cannot power down.\n");
@@ -611,21 +600,8 @@ static void tegra_mpdec_work_thread(struct work_struct *work) {
 
 out:
     if (state != TEGRA_MPDEC_DISABLED) {
-        /* This is being used if the lpcpu up/down delay values are different
-         * than the default mpdecision delay. */
-        switch (state) {
-        case TEGRA_MPDEC_LPCPU_DOWN:
-            queue_delayed_work(tegra_mpdec_workq, &tegra_mpdec_work,
-                               msecs_to_jiffies(TEGRA_MPDEC_LPCPU_DOWNDELAY));
-            break;
-        case TEGRA_MPDEC_LPCPU_UP:
-                queue_delayed_work(tegra_mpdec_workq, &tegra_mpdec_work,
-                                   msecs_to_jiffies(TEGRA_MPDEC_LPCPU_UPDELAY));
-            break;
-        default:
-            queue_delayed_work(tegra_mpdec_workq, &tegra_mpdec_work,
-                               msecs_to_jiffies(tegra_mpdec_tuners_ins.delay));
-        }
+        queue_delayed_work(tegra_mpdec_workq, &tegra_mpdec_work,
+                           msecs_to_jiffies(tegra_mpdec_tuners_ins.delay));
     }
     return;
 }
@@ -684,13 +660,18 @@ static void unboost_cpu(int cpu) {
 static void tegra_mpdec_revib_work_thread(struct work_struct *work) {
     int cpu = smp_processor_id();
 
-    if (ktime_to_ms(ktime_get()) > per_cpu(tegra_mpdec_cpudata, cpu).boost_until) {
-        unboost_cpu(cpu);
+    if (per_cpu(tegra_mpdec_cpudata, cpu).is_boosted) {
+        per_cpu(tegra_mpdec_cpudata, cpu).revib_wq_running = true;
+        if (ktime_to_ms(ktime_get()) > per_cpu(tegra_mpdec_cpudata, cpu).boost_until) {
+            unboost_cpu(cpu);
+        } else {
+            queue_delayed_work_on(cpu,
+                                  tegra_mpdec_revib_workq,
+                                  &per_cpu(tegra_mpdec_revib_work, cpu),
+                                  msecs_to_jiffies((per_cpu(tegra_mpdec_cpudata, cpu).boost_until - ktime_to_ms(ktime_get()))));
+        }
     } else {
-        queue_delayed_work_on(cpu,
-                              tegra_mpdec_revib_workq,
-                              &per_cpu(tegra_mpdec_revib_work, cpu),
-                              msecs_to_jiffies((per_cpu(tegra_mpdec_cpudata, cpu).boost_until - ktime_to_ms(ktime_get()))));
+        per_cpu(tegra_mpdec_cpudata, cpu).revib_wq_running = false;
     }
     return;
 }
@@ -841,7 +822,7 @@ static void tegra_mpdec_early_suspend(struct early_suspend *h) {
             pr_err(MPDEC_TAG"CPU[LP] error, cannot power up.\n");
     } else if (!is_lp_cluster()) {
         queue_delayed_work(tegra_mpdec_suspended_workq, &tegra_mpdec_suspended_work,
-                           TEGRA_MPDEC_LPCPU_UPDELAY);
+                           TEGRA_MPDEC_LPCPU_CHECK_DELAY);
     }
     pr_info(MPDEC_TAG"Screen -> off. Deactivated mpdecision.\n");
 }
@@ -1271,7 +1252,13 @@ static ssize_t store_boost_freqs(struct kobject *a, struct attribute *b,
         }
     }
     sscanf(chz, "%lu", &hz);
+
+    /* if this cpu is currently boosted, unboost */
+    unboost_cpu(cpu);
+
+    /* update boost freq */
     per_cpu(tegra_mpdec_cpudata, cpu).boost_freq = hz;
+
     return count;
 }
 define_one_global_rw(boost_freqs);
@@ -1434,7 +1421,7 @@ static int __init tegra_mpdec_init(void) {
         per_cpu(tegra_mpdec_cpudata, cpu).times_cpu_unplugged = 0;
         per_cpu(tegra_mpdec_cpudata, cpu).times_cpu_hotplugged = 0;
 #ifdef CONFIG_TEGRA_MPDECISION_INPUTBOOST_CPUMIN
-        per_cpu(tegra_mpdec_cpudata, cpu).norm_min_freq = 102000;
+        per_cpu(tegra_mpdec_cpudata, cpu).norm_min_freq = per_cpu(tegra_cpu_min_freq, cpu);
         switch (cpu) {
             case 0:
             case 1:
