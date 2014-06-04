@@ -849,8 +849,10 @@ static int tegra3_cpu_clk_set_rate(struct clk *c, unsigned long rate)
 			return -ENOSYS;
 		else if ((!c->dvfs->dvfs_rail->reg) &&
 			  (clk_get_rate_locked(c) < rate)) {
+#ifndef CONFIG_TEGRA3_VARIANT_CPU_OVERCLOCK
 			WARN(1, "Increasing CPU rate while regulator is not"
 				" ready may overclock CPU\n");
+#endif
 			return -ENOSYS;
 		}
 	}
@@ -4888,11 +4890,12 @@ static struct cpufreq_frequency_table freq_table_1p7GHz[] = {
 
 static struct tegra_cpufreq_table_data cpufreq_tables[] = {
 	{ freq_table_300MHz, 0,  1 },
-	{ freq_table_1p0GHz, 2,  8 },
-	{ freq_table_1p3GHz, 2, 10 },
-	{ freq_table_1p4GHz, 2, 11 },
-	{ freq_table_1p5GHz, 2, 12 },
-	{ freq_table_1p7GHz, 2, 12 },
+    { freq_table_1p0GHz, 2,  9 },
+    { freq_table_1p3GHz, 2, 11 },
+    { freq_table_1p4GHz, 2, 12 },
+    { freq_table_1p5GHz, 2, 13 },
+    { freq_table_1p6GHz, 2, 13 },
+    { freq_table_1p7GHz, 2, 13 },
 };
 
 static int clip_cpu_rate_limits(

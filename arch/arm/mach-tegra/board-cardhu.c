@@ -69,6 +69,7 @@
 #include <mach/pci.h>
 #include <mach/board-cardhu-misc.h>
 #include <mach/tegra_fiq_debugger.h>
+#include <linux/tegra_minmax_cpufreq.h>
 
 #include "board.h"
 #include "clock.h"
@@ -1874,6 +1875,13 @@ static void ME301T_HWid_init(void)
 }
 static void __init tegra_cardhu_init(void)
 {
+    /* init cpu min/max defaults */
+    int cpu;
+    for_each_present_cpu(cpu) {
+        per_cpu(tegra_cpu_min_freq, cpu) = CONFIG_TEGRA_CPU_FREQ_MIN;
+        per_cpu(tegra_cpu_max_freq, cpu) = CONFIG_TEGRA_CPU_FREQ_MAX;
+    }
+
         u32 project_info = tegra3_get_project_id();
 	/* input chip uid for initialization of kernel misc module */
 	cardhu_misc_init(tegra_chip_uid());
